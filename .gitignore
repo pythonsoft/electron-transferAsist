@@ -4,3 +4,5 @@ OutApp/
 dist/
 local.db
 npm-debug.log
+.DS_Store
+.idea/
