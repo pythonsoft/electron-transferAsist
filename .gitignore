@@ -1,0 +1,6 @@
+build/
+node_modules/
+OutApp/
+dist/
+local.db
+npm-debug.log
