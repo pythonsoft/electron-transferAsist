@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>凤云快传助手1.0</title>
+    <link href="./css/style.css" rel="stylesheet"/>
+    <link href="./css/bootstrap.min.css" rel="stylesheet">
+    <script>window.$ = window.jQuery = require('./js/jquery.min.js');</script>
+    <script src="./js/bootstrap.min.js"></script>
+</head>
+<body>
+<div class="title">
+    <h2>传输助手</h2>
+    <h4 id="deviceId">标识码:</h4>
+</div>
+<div class="container">
+<form class="form-horizontal">
+    <div class="form-group form-group-custom">
+        <label class="control-label col-sm-2" for="username">用户名:</label>
+        <div class="col-sm-10">
+            <input type="text" class="form-control" style="width: 250px;" id="username" placeholder="输入用户名">
+        </div>
+    </div>
+    <div class="form-group form-group-custom">
+        <label class="control-label col-sm-2" for="password">密码:</label>
+        <div class="col-sm-10">
+            <input type="password" class="form-control" style="width: 250px;" id="password" placeholder="输入密码">
+        </div>
+    </div>
+    <div class="form-group form-group-custom">
+        <div class="col-sm-offset-2 col-sm-10">
+            <button class="btn btn-default" id="btn">登录</button>
+        </div>
+    </div>
+</form>
+</div>
+</body>
+<script src="./js/api.js"></script>
+<script src="./js/utils.js"></script>
+<script>
+    $.ajaxSetup({
+        beforeSend: function(xhr) {
+            xhr.setRequestHeader('token', require('electron').remote.getGlobal('sharedObject').token);
+        }
+    });
+
+    var isLogin = function(){
+        getAccountInfo({}, function(err, result){
+            if(!err){
+                window.location.href = './watch.html';
+            }
+        })
+    }
+
+    isLogin();
+</script>
+<script>
+$(function(){
+    var userNameJQ = $("#username");
+    var passwordJQ = $("#password");
+    var loginBtnJQ = $("#btn");
+    var deviceIdJQ = $("#deviceId");
+    var deviceId = null;
+
+    var getDeviceId = function(){
+        generateDeviceId(function(err, id) {
+            if (err) {
+                alert(err);
+                return;
+            } else {
+                deviceId = id;
+                deviceIdJQ.text("标识码: "+deviceId);
+            }
+        });
+    }
+
+    getDeviceId();
+
+    loginBtnJQ.click(function(e){
+        e.preventDefault();
+        loginBtnJQ.attr('disabled', true);
+        loginBtnJQ.text("登录中...");
+        var email = userNameJQ.val();
+        var password = passwordJQ.val();
+        email = $.trim(email);
+        password = $.trim(password);
+        if(email && password) {
+            console.log("deviceId===>", deviceId);
+            var data = {
+                email: email,
+                password: password,
+                deviceId: deviceId
+            };
+            getToken(data, function (err, token) {
+                if (err) {
+                    alert(err);
+                } else {
+                    require('electron').remote.getGlobal('sharedObject').token = token;
+                    window.location.href = './watch.html';
+                }
+                loginBtnJQ.text("登录");
+                loginBtnJQ.attr('disabled', false);
+            })
+        }else{
+            alert("请输入用户名和密码");
+            loginBtnJQ.text("登录");
+            loginBtnJQ.attr('disabled', false);
+        }
+    })
+})
+</script>
+</html>

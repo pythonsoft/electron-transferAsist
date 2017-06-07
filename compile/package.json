@@ -1,0 +1,23 @@
+{
+  "name": "watchfile",
+  "version": "1.0.0",
+  "description": "watchfile",
+  "main": "main.js",
+  "dependencies": {
+    "chokidar": "^1.7.0",
+    "graceful-fs": "^4.1.11",
+    "md5": "^2.2.1",
+    "sqlite3": "^3.1.8",
+    "uuid": "^3.0.1"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "apack": "electron-windows-inno-installer ./ --platform win32-x64",
+    "package": "electron-packager ./ 传输助手 --all --out ./OutApp --electron-version 1.6.8 --overwrite",
+    "pack:win32": "electron-packager . 传输助手 --out=dist/win  --electron-version 1.6.8 --platform=win32 --arch=x64 --baseTempDir=/Users/steven/Downloads",
+    "postinstall": "cd node_modules/sqlite3 && npm install nan && npm run prepublish && node-gyp configure --module_name=node_sqlite3 --module_path=../lib/binding/electron-v1.6-darwin-x64 && node-gyp rebuild --target=1.6.8 --arch=x64 --target_platform=darwin --dist-url=https://atom.io/download/atom-shell --module_name=node_sqlite3 --module_path=../lib/binding/electron-v1.6-darwin-x64"
+  },
+  "author": "steven",
+  "license": "ISC"
+}

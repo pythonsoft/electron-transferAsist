@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>凤云快传助手1.0</title>
+    <link href="./css/style.css" rel="stylesheet"/>
+    <link href="./css/bootstrap.min.css" rel="stylesheet">
+    <link href="./css/bootstrap-table.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="left">
+    <h>凤云快传助手1.0</h><br>
+    <div>
+    <button id="logout" class="btn logout">退出登录</button>
+    </div>
+    <div>
+    <button id="stop" class="btn danger logout">暂停监控</button>
+    </div>
+    <div>
+    <button id="start" class="btn primary logout" disabled>开始监控</button>
+    </div>
+</div>
+<div class="content">
+    <h4 id="deviceId">标识码:</h4>
+    <span id="message-span">正在监控.....</span>
+    <div>
+        <button type="button" class="btn btn-danger" id="refresh">刷新</button>
+    </div>
+    <table id="table" class="col-xs-12" data-toolbar="#toolbar" data-toggle="table" data-ajax="ataListAjax" data-search="true" data-side-pagination="server" data-pagination="true">
+        <thead>
+        <tr>
+            <th data-field="id">ID</th>
+            <th data-field="status" data-formatter="statusFormatter">传输状态</th>
+            <th data-field="path">监控文件路径</th>
+            <th data-field="cachePath">缓存路径</th>
+            <th data-field="removeOrNot" data-formatter="removeFormatter">是否保留原文件</th>
+            <!--<th data-field="destination">发送目标</th>-->
+            <th data-field="createdAt" data-formatter="dataFormatter">创建时间</th>
+            <th data-field="updatedAt" data-formatter="dataFormatter">更新时间</th>
+        </tr>
+        </thead>
+    </table>
+</div>
+</body>
+<script>window.$ = window.jQuery = require('./js/jquery.min.js');</script>
+<script src="./js/bootstrap.min.js"></script>
+<script src="./js/bootstrap-table.min.js"></script>
+<script src="./js/bootstrap-table-zh-CN.min.js"></script>
+<script src="./js/bootstrap-paginator.js"></script>
+<script src="./js/api.js"></script>
+<script src="./js/client.js"></script>
+<script src="./js/downloadAndUpload.js"></script>
+<script src="./js/login.js"> </script>
+<script src="./js/utils.js"> </script>
+<script src="./js/db.js"> </script>
+<script>
+    const {dialog} = require('electron').remote;
+    var fs = require('graceful-fs');
+    var path = require('path');
+    var chokidar = require('chokidar');
+    var logoutJQ = $("#logout");
+    var stopJQ = $("#stop");
+    var startJQ = $("#start");
+    var messageSpanJQ = $("#message-span");
+    var taskQueen = [];
+    var addFileQueen = [];
+    var watchInstanceArr = [];
+    var maxTaskNumber = 5;
+
+    var ataTableJQ = $("#table");
+    var refreshJQ = $("#refresh");
+    var interval1 = null;
+    var interval2 = null;
+    var interval3 = null;
+
+    var deviceIdJQ = $("#deviceId");
+    var deviceId = null;
+
+    var getDeviceId = function(){
+        generateDeviceId(function(err, id) {
+            if (err) {
+                alert(err);
+                return;
+            } else {
+                deviceId = id;
+                deviceIdJQ.text("标识码: "+deviceId);
+            }
+        });
+    }
+
+    function ataListAjax(params) {
+        var page = parseInt(params.data.offset) / 10 + 1;
+        var newParams = {
+            pageSize: params.data.limit,
+            page: page,
+            sort: params.data.sort,
+            status: params.data.search || ""
+        }
+        console.log("before get pagination");
+        getPaginationData(newParams, function (err, data) {
+            if (err) {
+                console.log(err);
+            } else {
+                console.log(data);
+                params.success(data);
+            }
+        })
+    }
+
+    function statusFormatter(value) {
+        if (value == -2) {
+            return '<span class="status monitor">' + '已加入文件队列' + '</span>';
+        } else if (value == -1) {
+            return '<span class="status unknown">' + '正在上传' + '</span>';
+        } else if (value == 4) {
+            return '<span class="status enable">' + '传输完成' + '</span>';
+        }else if (value == 5) {
+            return '<span class="status warn">' + '传输失败' + '</span>';
+        }else if (value == 100) {
+            return '<span class="status danger">' + '原文件已删除' + '</span>';
+        }
+    }
+
+    function removeFormatter(value){
+        if(value){
+            return '不保留';
+        }else{
+            return '保留';
+        }
+    }
+
+    function dataFormatter(value){
+        if(value){
+            return timeStamp2String(value);
+        }
+    }
+
+    refreshJQ.click(function(){
+        ataTableJQ.bootstrapTable('refresh');
+    })
+
+    setInterval(function(){
+        ataTableJQ.bootstrapTable('refresh');
+    }, 1000*60*5);
+
+    var makeRandomCode = function(length) {
+        let text = "";
+        let possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+        for (let i = 0; i < length; i++) {
+            text += possible.charAt(Math.floor(Math.random() * possible.length));
+        }
+        return text;
+    }
+
+    class WatchFile {
+        constructor(config, cachePath){
+            var srcPath = config.watchPath;
+            var destPath = cachePath;
+            if (!fs.existsSync(destPath)){
+                fs.mkdirSync(destPath);
+            }
+
+            var maxSize = config.fileSizeLessThan;
+            var minSize = config.fileSizeMoreThan;
+            var postfix = config.fileExt;
+            var removeOrNot = config.removeOrNot == 'notremove'? false: true;
+            var destination = config.destination;
+
+            var watchPathArr = [];
+            if(postfix){
+                var postFixArr = postfix.split(',');
+                for(let i = 0; i <= postFixArr.length; i++){
+                    watchPathArr.push(path.join(srcPath, "*" + postFixArr[i]));
+                }
+            }else{
+                watchPathArr.push(path.join(srcPath, "*"));
+            }
+            this.watcher = chokidar.watch(watchPathArr, {
+                ignored: /[\/\\]\./,
+                persistent: true
+            });
+            this.watcher
+                    .on('add', function(filePath) {
+                        console.log('File', filePath, 'has been added');
+                        const stats = fs.statSync(filePath);
+                        const fileSizeInBytes = stats.size;
+                        if (maxSize) {
+                            if (fileSizeInBytes > maxSize * 1024 * 1024) {
+                                console.log("文件大于设置" + fileSizeInBytes);
+                                return;
+                            }
+                        }
+                        if (minSize) {
+                            if (fileSizeInBytes <= minSize * 1024 * 1024) {
+                                console.log("文件小于设置" + fileSizeInBytes);
+                                return;
+                            }
+                        }
+
+                        var md5 = getFileMd5(filePath);
+                        if(checkFileIsDealedByMd5(md5)){
+                            console.log('File', filePath, 'has been dealed');
+                            return;
+                        }else {
+
+                            if (destPath) {
+                                let arr = filePath.split(path.sep);
+                                let fileName = arr[arr.length - 1];
+                                console.log("fileName==>", fileName);
+                                let destinationPath = path.join(destPath, new Date().getTime() + fileName);
+                                var stream = fs.createReadStream(filePath).pipe(fs.createWriteStream(destinationPath));
+                                stream.on("finish", function () {
+                                    addFileToQueen(md5, filePath, destinationPath, removeOrNot, destination);
+                                })
+                            } else {
+                                addFileToQueen(md5, filePath, "", removeOrNot, destination);
+                            }
+                        }
+                    })
+                    .on('addDir', function(filePath) {
+                        console.log('Directory', filePath, 'has been added');
+                    })
+                    .on('change', function(filePath) {
+                        console.log('File', filePath, 'has been changed');
+                    })
+                    .on('unlink', function(filePath) {
+                        console.log('File', filePath, 'has been removed');
+                    })
+                    .on('unlinkDir', function(filePath) {
+                        console.log('Directory', filePath, 'has been removed');
+                    })
+                    .on('error', function(error) {
+                        console.log('Error happened', error);
+                    })
+                    .on('raw', function(event, filePath, details) {
+                        // This event should be triggered everytime something happens.
+                        console.log('Raw event info:', event, filePath, details);
+                    });
+        }
+
+        close(){
+            this.watcher.close();
+        }
+    }
+
+    function addFileToQueen(md5, filePath, destinationPath, removeOrNot, destination){
+        console.log("继续");
+        console.log("destination===>", destination);
+        for (let i = 0; i < destination.length; i++) {
+           // addFileQueen.push({destinationPath: destinationPath, destination: destination[i]});
+            let value = {
+                md5: md5,
+                path: filePath,
+                removeOrNot: removeOrNot,
+                destination: JSON.stringify(destination[i]),
+                cachePath: destinationPath,
+                taskId: "",
+                status: STATUS.ADD_FILE_QUEEN
+            }
+            console.log("before insert file info");
+            insertFileInfo(value);
+            console.log("after insert file info");
+        }
+    }
+
+    function createTask(){
+        var countQuery = "status=" + STATUS.CREATE_TASK;
+        console.log("create task before countQuery");
+        getFileInfoByQuery(countQuery, function(err, rows){
+            if(err){
+                return;
+            }
+            console.log("create task after countQuery==>", rows);
+            if((rows && rows.length && rows.length >= maxTaskNumber)){    //正在上传的任务数量大于最大限制
+                console.log("已经有"+rows.length+"个任务正在上传,不能再创建任务了");
+                return;
+            }else{
+                var query = "status in (-2, 5)" + " limit 1";
+                console.log("create task before query");
+                getFileInfoByQuery(query, function(err, rows){
+                    if(err){
+                        return;
+                    }
+                    console.log("create task after query ==>", rows);
+                    if(rows && rows.length){
+                        var row = rows[0];
+                        var id = row.id;
+                        var destinationPath = row.cachePath || row.path;  //有缓存目录取缓存目录
+                        var destination = JSON.parse(row.destination);
+                        console.log("destination==>",destination);
+
+                        if(!fs.existsSync(destinationPath)){        //本地路径不存在,就删除这个任务
+                            console.log(destinationPath + " is not exists!");
+                            updateFileInfoById(id, "", STATUS.DELETED);
+                        }else {
+                            const stats = fs.statSync(destinationPath);
+                            const fileSizeInBytes = stats.size;
+                            var postData = {
+                                receiver: destination.receiver,
+                                filesInfo: [{"name": destinationPath, "size": fileSizeInBytes}],
+                                packageName: getPackageName(destinationPath),
+                                transferType: "send",
+                                transferMode: destination.transferMode,
+                                captcha: makeRandomCode(6),
+                                hasCaptcha: true,
+                                remark: "",
+                                debug: 0,
+                                shortlinkId: "",
+                                resourceId: "",
+                                cryptoType: destination.cryptoType,
+                                removeAfterRead: false,
+                                downloadLimit: destination.downloadLimit || 5,
+                                clientVersion: clientVersion,
+                                engineId: destination.engineId
+                            };
+                            console.log("postData==>", postData);
+                            generateShortLinkId(function (err, shortlinkId) {
+                                if (err) {
+                                    console.log(err);
+                                } else {
+                                    postData.shortlinkId = shortlinkId;
+                                    MEC.upload(postData, function (tasks, pluginResult) {
+                                        if (tasks && tasks.length) {
+                                            var taskId = tasks[0]._id.toString();
+                                            updateFileInfoById(id, taskId, STATUS.CREATE_TASK);
+                                        }
+                                    }, function errorFn(errorMessage) {
+                                        console.log(errorMessage);
+                                        updateFileInfoById(id, "", STATUS.FAILED);
+                                    });
+                                }
+                            })
+                        }
+                    }
+                })
+            }
+        })
+    }
+
+    function updateTaskStatus(rows){
+        if(rows.length){
+            var row = rows.shift();
+            var path = row.path;
+            var cachePath = row.cachePath;
+            var removeOrNot = row.removeOrNot;
+
+            getTaskStatus({id: row.taskId}, function(err, result){
+                if(err){
+                    console.log("get task err==>", err);
+                }else{
+                    var status = result.processStatus;
+                    if(status == 5 || status == 8){    //本地异常需要重传
+                        console.log("本地异常需要重传===" + row.path);
+                        updateFileInfoById(row.id, row.taskId, STATUS.FAILED);
+                        updateTaskStatus(rows);
+                    }else if(status >= 4){  //传输完成
+                        console.log("传输完成或暂停");
+                        if(cachePath) {
+                            fs.unlinkSync(cachePath);
+                        }
+                        console.log("remove===>", removeOrNot);
+                        if(removeOrNot){
+                            console.log("path===>", path);
+                            fs.unlinkSync(path);
+                        }
+                        updateFileInfoById(row.id, row.taskId, STATUS.COMPLETED);
+                        updateTaskStatus(rows);
+                    }
+                }
+            })
+        }else{
+            return;
+        }
+    }
+
+    function updateTask(){
+        var query = "status=" + STATUS.CREATE_TASK;
+        getFileInfoByQuery(query, function(err, rows) {
+            if (err) {
+                return;
+            }
+            if(rows && rows.length) {
+                updateTaskStatus(rows);
+            }
+        })
+    }
+
+    function isAtaVersionChanged(){
+        generateDeviceId(function(err, deviceId) {
+            if (err) {
+                alert(err);
+                return;
+            }
+            var data = {
+                deviceId: deviceId
+            }
+            var oldVersion = require('electron').remote.getGlobal('sharedObject').version;
+            getAtaDetail(data, function (err, result) {
+                if (err) {
+                    console.log("getAta detail err");
+                } else {
+                    console.log(result);
+                    var cachePath = result.cachePath;
+                    if (oldVersion != result.version) {   //版本发生变化,停止原来监控,重新监控
+                        deleteWatchInstance();
+
+                        var data = {
+                            deviceId: deviceId,
+                            isActive: 'active'
+                        }
+                        require('electron').remote.getGlobal('sharedObject').version = result.version;
+                        ataListConfig(data, function (err, result) {
+                            if (err) {
+                                console.log("list config err==>", err);
+                            } else {
+                                var configs = result;
+                                console.log("configs===>", configs);
+                                if (configs.length) {
+                                    for (let i = 0; i < configs.length; i++) {
+                                        let config = configs[i];
+                                        let watchInstance = new WatchFile(config, cachePath);
+                                        watchInstanceArr.push(watchInstance);
+                                    }
+                                }
+                            }
+                        })
+                    } else {                                            //版本不变化,不做任何改动
+                        console.log('配置信息没变化,不做改变');
+                    }
+                }
+            })
+        })
+    }
+
+    var deleteWatchInstance = function(){
+        watchInstanceArr.forEach(function(item){   //停止原来的监控
+            item.close();
+            delete item;
+        })
+        require('electron').remote.getGlobal('sharedObject').version = '';
+    }
+
+    var startAllInterval = function(){
+        interval1 =  setInterval(function(){isAtaVersionChanged()}, 3000); //每分钟检测一次配置信息是否发生变化
+
+        interval2 = setInterval(function(){
+            createTask();
+        }, 2000);
+
+        interval3 = setInterval(function(){
+            updateTask();
+        }, 1000);
+    }
+
+    var stopAllInterval = function(){
+        clearInterval(interval1);
+        clearInterval(interval2);
+        clearInterval(interval3);
+    }
+
+    getDeviceId();
+
+    startAllInterval();
+
+
+    logoutJQ.click(function(){
+        require('electron').remote.getGlobal('sharedObject').token = "";
+        logout({}, function(err, result){
+            if(err){
+                alert('登出失败' + err);
+            }else {
+                stopAllInterval();
+                deleteWatchInstance();
+                window.location.href = "./login.html";
+            }
+        })
+    })
+
+    stopJQ.click(function(){
+        stopAllInterval();
+        deleteWatchInstance();
+        messageSpanJQ.text("停止监控.....");
+        stopJQ.attr("disabled", true);
+        startJQ.attr("disabled", false);
+    });
+
+    startJQ.click(function(){
+        startAllInterval();
+        messageSpanJQ.text("正在监控.....");
+        stopJQ.attr("disabled", false);
+        startJQ.attr("disabled", true);
+    });
+</script>
+</html>
