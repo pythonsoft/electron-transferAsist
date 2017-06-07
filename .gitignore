@@ -7,3 +7,5 @@ npm-debug.log
 .idea/
 .cache/
 release/
+compile/
+app.asar

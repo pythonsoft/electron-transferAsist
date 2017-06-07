@@ -2,7 +2,10 @@
  * Created by steven on 17/6/1.
  */
 var sqlite3 = require('sqlite3').verbose();
-var db = new sqlite3.Database('local.db');
+const path = require('path')
+const dbPath = path.resolve(__dirname, 'local.db')
+console.log("dbPath===>", dbPath);
+var db = new sqlite3.Database(dbPath);
 
 db.serialize(function(){
   db.run("create table IF NOT EXISTS fileInfo(id INTEGER PRIMARY KEY NOT NULL,md5 TEXT,path TEXT, removeOrNot BOOLEAN, destination TEXT, cachePath TEXT, taskId char(100), status INT, createdAt TEXT, updatedAt TEXT)")
