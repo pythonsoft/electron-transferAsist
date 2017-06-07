@@ -4,7 +4,9 @@
 var clientVersion = "2.1.2.8";
 var fs = require('graceful-fs');
 var sqlite3 = require('sqlite3').verbose();
-var db = new sqlite3.Database('local.db');
+const path = require('path')
+const dbPath = path.resolve(__dirname, 'local.db')
+var db = new sqlite3.Database(dbPath);
 const md5 = require("md5");
 const uuidV4 = require('uuid/v4');
 

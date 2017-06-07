@@ -4,7 +4,6 @@
 var sqlite3 = require('sqlite3').verbose();
 const path = require('path')
 const dbPath = path.resolve(__dirname, 'local.db')
-console.log("dbPath===>", dbPath);
 var db = new sqlite3.Database(dbPath);
 
 db.serialize(function(){
